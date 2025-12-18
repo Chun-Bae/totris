@@ -30,8 +30,18 @@ const PREVIEW_BLOCK_MIN = 14;
 const PREVIEW_SCALE_MOBILE = 0.65; // 보드 대비 프리뷰 비율(모바일)
 const PREVIEW_SCALE_DESKTOP = 0.75; // 보드 대비 프리뷰 비율(데스크톱)
 
+
 const PREVIEW_COLS = 6;
 const PREVIEW_ROWS = 6;
+
+// ===== Input repeat tuning =====
+// 터치(버튼 길게 누르기) 반복: 너무 빨라서 한 번 탭에도 2번 입력되는 걸 방지하려고 delay를 둠
+const TOUCH_REPEAT_DELAY_MS = 180;
+const TOUCH_REPEAT_INTERVAL_MS = 90;
+
+// 키보드(화살표) 반복도 동일하게 통제 (OS key repeat 대신 앱에서 제어)
+const KEY_REPEAT_DELAY_MS = 140;
+const KEY_REPEAT_INTERVAL_MS = 60;
 
 
 type Vocab = {
@@ -242,6 +252,12 @@ export default function Home() {
   const repeatTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
+  const repeatDelayRef = useRef<number | null>(null);
+
+  const keyRepeatTimerRef = useRef<number | null>(null);
+  const keyRepeatDelayRef = useRef<number | null>(null);
+  const keyRepeatKeyRef = useRef<string | null>(null);
+
   const boardRef = useRef<Board>(makeEmptyBoard());
 
   // 현재/다음/홀드
@@ -262,17 +278,39 @@ export default function Home() {
   const [vocabPopup, setVocabPopup] = useState<Vocab | null>(null);
 
   const stopRepeat = () => {
+    if (repeatDelayRef.current != null) {
+      window.clearTimeout(repeatDelayRef.current);
+      repeatDelayRef.current = null;
+    }
     if (repeatTimerRef.current != null) {
       window.clearInterval(repeatTimerRef.current);
       repeatTimerRef.current = null;
     }
   };
 
+  const stopKeyRepeat = () => {
+    if (keyRepeatDelayRef.current != null) {
+      window.clearTimeout(keyRepeatDelayRef.current);
+      keyRepeatDelayRef.current = null;
+    }
+    if (keyRepeatTimerRef.current != null) {
+      window.clearInterval(keyRepeatTimerRef.current);
+      keyRepeatTimerRef.current = null;
+    }
+    keyRepeatKeyRef.current = null;
+  };
+
   const startRepeat = (fn: () => void) => (e: React.PointerEvent) => {
     e.preventDefault();
+
+    // 1회 입력
     fn();
+
+    // 길게 누를 때만 반복되게: 짧은 탭에서 interval이 한 번 더 실행되는 문제 방지
     stopRepeat();
-    repeatTimerRef.current = window.setInterval(fn, 70);
+    repeatDelayRef.current = window.setTimeout(() => {
+      repeatTimerRef.current = window.setInterval(fn, TOUCH_REPEAT_INTERVAL_MS);
+    }, TOUCH_REPEAT_DELAY_MS);
   };
 
   const clearToastTimer = () => {
@@ -331,6 +369,7 @@ export default function Home() {
   useEffect(() => {
     return () => {
       stopRepeat();
+      stopKeyRepeat();
       clearToastTimer();
     };
   }, []);
@@ -625,20 +664,63 @@ export default function Home() {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") tryMove(-1, 0);
-      else if (e.key === "ArrowRight") tryMove(1, 0);
-      else if (e.key === "ArrowDown") tryMove(0, 1);
-      else if (e.key === "ArrowUp") tryRotate();
+      // OS 키 반복(e.repeat)로 너무 빨리/여러 번 입력되는 걸 방지
+      // 화살표 이동은 앱에서 repeat를 직접 제어
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowDown") {
+        if (e.repeat) return;
+
+        const key = e.key;
+        const action =
+          key === "ArrowLeft"
+            ? () => tryMove(-1, 0)
+            : key === "ArrowRight"
+              ? () => tryMove(1, 0)
+              : () => tryMove(0, 1);
+
+        // 다른 방향 키를 누르면 기존 반복을 끊고 새로 시작
+        stopKeyRepeat();
+        keyRepeatKeyRef.current = key;
+
+        // 1회 입력
+        action();
+
+        // 길게 누르면 반복
+        keyRepeatDelayRef.current = window.setTimeout(() => {
+          keyRepeatTimerRef.current = window.setInterval(action, KEY_REPEAT_INTERVAL_MS);
+        }, KEY_REPEAT_DELAY_MS);
+        return;
+      }
+
+      // 나머지 키들은 1회만(반복 방지)
+      if (e.repeat) return;
+
+      if (e.key === "ArrowUp") tryRotate();
       else if (e.key === " ") hardDrop();
       else if (e.key === "c" || e.key === "C" || e.key === "Shift") hold();
-      else if (e.key.toLowerCase() === "r"  || e.key.toLowerCase() === "R" ||  e.key.toLowerCase() === "ㄱ") restart();
+      else if (e.key.toLowerCase() === "r" || e.key.toLowerCase() === "ㄱ") restart();
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      // 눌렀던 방향키를 떼면 반복 중지
+      if (keyRepeatKeyRef.current && e.key === keyRepeatKeyRef.current) {
+        stopKeyRepeat();
+      }
+    };
+
+    const onBlur = () => {
+      stopKeyRepeat();
     };
 
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       stopRepeat();
+      stopKeyRepeat();
       actionsRef.current = null;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
