@@ -26,12 +26,25 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Totris",
     description: "Tetris with TOEIC",
-    images: [{ url: "/public/og.png", width: 1200, height: 630 }],
+    url: baseUrl,
+    siteName: "Totris",
+    locale: "ko_KR",
+    // 일부 크롤러(카톡 포함)는 절대 URL을 더 안정적으로 처리함
+    images: [
+      {
+        url: new URL("/og.png", baseUrl),
+        width: 1200,
+        height: 630,
+        alt: "Totris",
+      },
+    ],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    images: ["/public//og.png"], 
+    title: "Totris",
+    description: "Tetris with TOEIC",
+    images: [new URL("/og.png", baseUrl)],
   },
 };
 export default function RootLayout({
