@@ -6,10 +6,30 @@ import wordsRaw from "../data/word.json";
 
 const COLS = 10;
 const ROWS = 20;
-const BLOCK = 28;
 
-// Preview(Next/Hold) 캔버스 크기/블록 크기
-const PREVIEW_BLOCK = 20;
+// ===== Responsive sizing (원하는 대로 여기만 바꾸면 됨) =====
+// 기본(데스크톱) 보드 블록 크기
+const BOARD_BLOCK_BASE = 28;
+
+// 화면 폭 기준(이 값보다 작으면 모바일로 간주)
+const MOBILE_BREAKPOINT = 480;
+
+// 화면 폭에 맞춰 계산할 때 사용하는 값들
+const BOARD_USABLE_MIN = 240; // 너무 작아지는 것 방지
+const BOARD_SIDE_PADDING = 32; // 좌우 패딩 가정
+const BOARD_CANVAS_MAX = 420; // 보드가 너무 커지지 않게 상한
+
+// 모바일/데스크톱에서 허용할 보드 블록 크기 범위
+const BOARD_BLOCK_MAX_MOBILE = 22;
+const BOARD_BLOCK_MIN_MOBILE = 14;
+const BOARD_BLOCK_MIN_DESKTOP = 18;
+
+// Preview(Next/Hold) 기본 블록 크기
+const PREVIEW_BLOCK_BASE = 20;
+const PREVIEW_BLOCK_MIN = 14;
+const PREVIEW_SCALE_MOBILE = 0.65; // 보드 대비 프리뷰 비율(모바일)
+const PREVIEW_SCALE_DESKTOP = 0.75; // 보드 대비 프리뷰 비율(데스크톱)
+
 const PREVIEW_COLS = 6;
 const PREVIEW_ROWS = 6;
 
@@ -154,10 +174,11 @@ function clearLines(board: Board): number {
 function drawPreview(
   ctx: CanvasRenderingContext2D,
   core: PieceCore | null,
-  label: string
+  label: string,
+  blockSize: number
 ) {
-  const w = PREVIEW_COLS * PREVIEW_BLOCK;
-  const h = PREVIEW_ROWS * PREVIEW_BLOCK;
+  const w = PREVIEW_COLS * blockSize;
+  const h = PREVIEW_ROWS * blockSize;
 
   // 배경
   ctx.clearRect(0, 0, w, h);
@@ -166,9 +187,10 @@ function drawPreview(
 
   // 라벨(캔버스 내부 상단)
   ctx.fillStyle = "rgba(255,255,255,0.75)";
-  ctx.font = "12px system-ui";
+  const labelFont = Math.max(10, Math.floor(blockSize * 0.6));
+  ctx.font = `${labelFont}px system-ui`;
   ctx.textAlign = "left";
-  ctx.fillText(label, 8, 16);
+  ctx.fillText(label, 8, Math.max(14, Math.floor(blockSize * 0.8)));
 
   if (!core) {
     // 빈 슬롯 표시
@@ -182,17 +204,17 @@ function drawPreview(
   const sw = shape[0].length;
 
   // 가운데 정렬
-  const offsetX = Math.floor((PREVIEW_COLS - sw) / 2) * PREVIEW_BLOCK;
-  const offsetY = Math.floor((PREVIEW_ROWS - sh) / 2) * PREVIEW_BLOCK + 10;
+  const offsetX = Math.floor((PREVIEW_COLS - sw) / 2) * blockSize;
+  const offsetY = Math.floor((PREVIEW_ROWS - sh) / 2) * blockSize + Math.floor(blockSize * 0.5);
 
   // 블록
   ctx.fillStyle = core.color;
   for (let y = 0; y < sh; y++) {
     for (let x = 0; x < sw; x++) {
       if (!shape[y][x]) continue;
-      const px = offsetX + x * PREVIEW_BLOCK;
-      const py = offsetY + y * PREVIEW_BLOCK;
-      ctx.fillRect(px + 2, py + 2, PREVIEW_BLOCK - 4, PREVIEW_BLOCK - 4);
+      const px = offsetX + x * blockSize;
+      const py = offsetY + y * blockSize;
+      ctx.fillRect(px + 2, py + 2, blockSize - 4, blockSize - 4);
     }
   }
 
@@ -232,8 +254,9 @@ export default function Home() {
   const [lines, setLines] = useState(0);
   const [gameOver, setGameOver] = useState(false);
 
-  const [block, setBlock] = useState(BLOCK);
+  const [block, setBlock] = useState(BOARD_BLOCK_BASE);
   const [isTouch, setIsTouch] = useState(false);
+  const [previewBlock, setPreviewBlock] = useState(PREVIEW_BLOCK_BASE);
 
   // 라인 삭제 시 보여줄 단어(팝업)
   const [vocabPopup, setVocabPopup] = useState<Vocab | null>(null);
@@ -281,10 +304,23 @@ export default function Home() {
 
       // 모바일 화면 폭에 맞춰 보드 블록 크기 자동 조절
       const w = typeof window !== "undefined" ? window.innerWidth : 1024;
-      const usable = Math.max(240, w - 32); // 좌우 패딩 고려
-      const candidate = Math.floor(Math.min(usable, 420) / COLS);
-      const nextBlock = Math.max(18, Math.min(BLOCK, candidate));
+      const usable = Math.max(BOARD_USABLE_MIN, w - BOARD_SIDE_PADDING); // 좌우 패딩 고려
+      const candidate = Math.floor(Math.min(usable, BOARD_CANVAS_MAX) / COLS);
+
+      // 모바일에서는 보드/프리뷰를 조금 더 작게
+      const isSmall = w < MOBILE_BREAKPOINT;
+      const maxBlock = isSmall ? BOARD_BLOCK_MAX_MOBILE : BOARD_BLOCK_BASE;
+      const minBlock = isSmall ? BOARD_BLOCK_MIN_MOBILE : BOARD_BLOCK_MIN_DESKTOP;
+      const nextBlock = Math.max(minBlock, Math.min(maxBlock, candidate));
       setBlock(nextBlock);
+
+      // 프리뷰(HOLD/NEXT)도 함께 축소
+      const scale = isSmall ? PREVIEW_SCALE_MOBILE : PREVIEW_SCALE_DESKTOP;
+      const nextPreview = Math.min(
+        PREVIEW_BLOCK_BASE,
+        Math.max(PREVIEW_BLOCK_MIN, Math.floor(nextBlock * scale))
+      );
+      setPreviewBlock(nextPreview);
     };
 
     detect();
@@ -310,12 +346,12 @@ export default function Home() {
     const nextCanvas = nextCanvasRef.current;
     const holdCanvas = holdCanvasRef.current;
     if (nextCanvas) {
-      nextCanvas.width = PREVIEW_COLS * PREVIEW_BLOCK;
-      nextCanvas.height = PREVIEW_ROWS * PREVIEW_BLOCK;
+      nextCanvas.width = PREVIEW_COLS * previewBlock;
+      nextCanvas.height = PREVIEW_ROWS * previewBlock;
     }
     if (holdCanvas) {
-      holdCanvas.width = PREVIEW_COLS * PREVIEW_BLOCK;
-      holdCanvas.height = PREVIEW_ROWS * PREVIEW_BLOCK;
+      holdCanvas.width = PREVIEW_COLS * previewBlock;
+      holdCanvas.height = PREVIEW_ROWS * previewBlock;
     }
 
     const ctx = canvas.getContext("2d");
@@ -333,8 +369,8 @@ export default function Home() {
 
     const draw = () => {
       // === Preview 패널 렌더 ===
-      if (nextCtx) drawPreview(nextCtx, nextRef.current, "NEXT");
-      if (holdCtx) drawPreview(holdCtx, holdRef.current, "HOLD");
+      if (nextCtx) drawPreview(nextCtx, nextRef.current, "NEXT", previewBlock);
+      if (holdCtx) drawPreview(holdCtx, holdRef.current, "HOLD", previewBlock);
 
       // === 메인 필드 렌더 ===
       ctx.fillStyle = "#0b1020";
@@ -606,7 +642,7 @@ export default function Home() {
       actionsRef.current = null;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [gameOver, block]);
+  }, [gameOver, block, previewBlock]);
 
   return (
     <main className="min-h-screen flex items-center justify-center p-4 md:p-8">
