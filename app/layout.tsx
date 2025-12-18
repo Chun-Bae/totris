@@ -26,12 +26,12 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Totris",
     description: "Tetris with TOEIC",
-    images: [{ url: "/og.png", width: 1200, height: 630 }],
+    images: [{ url: "/public/og.png", width: 1200, height: 630 }],
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    images: ["/og.png"], 
+    images: ["/public//og.png"], 
   },
 };
 export default function RootLayout({
