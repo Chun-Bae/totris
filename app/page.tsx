@@ -207,6 +207,18 @@ export default function Home() {
   const holdCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  const actionsRef = useRef<{
+    left: () => void;
+    right: () => void;
+    down: () => void;
+    rotate: () => void;
+    hardDrop: () => void;
+    hold: () => void;
+    restart: () => void;
+  } | null>(null);
+
+  const repeatTimerRef = useRef<number | null>(null);
+
   const boardRef = useRef<Board>(makeEmptyBoard());
 
   // 현재/다음/홀드
@@ -219,15 +231,58 @@ export default function Home() {
   const [lines, setLines] = useState(0);
   const [gameOver, setGameOver] = useState(false);
 
+  const [block, setBlock] = useState(BLOCK);
+  const [isTouch, setIsTouch] = useState(false);
+
   // 라인 삭제 시 보여줄 단어(팝업)
   const [vocabPopup, setVocabPopup] = useState<Vocab | null>(null);
+
+  const stopRepeat = () => {
+    if (repeatTimerRef.current != null) {
+      window.clearInterval(repeatTimerRef.current);
+      repeatTimerRef.current = null;
+    }
+  };
+
+  const startRepeat = (fn: () => void) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    fn();
+    stopRepeat();
+    repeatTimerRef.current = window.setInterval(fn, 70);
+  };
+
+  useEffect(() => {
+    const detect = () => {
+      const touch =
+        typeof window !== "undefined" &&
+        (("ontouchstart" in window) || (navigator.maxTouchPoints ?? 0) > 0);
+      setIsTouch(touch);
+
+      // 모바일 화면 폭에 맞춰 보드 블록 크기 자동 조절
+      const w = typeof window !== "undefined" ? window.innerWidth : 1024;
+      const usable = Math.max(240, w - 32); // 좌우 패딩 고려
+      const candidate = Math.floor(Math.min(usable, 420) / COLS);
+      const nextBlock = Math.max(18, Math.min(BLOCK, candidate));
+      setBlock(nextBlock);
+    };
+
+    detect();
+    window.addEventListener("resize", detect);
+    return () => window.removeEventListener("resize", detect);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopRepeat();
+    };
+  }, []);
 
   useEffect(() => {
     // 메인 캔버스
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = COLS * BLOCK;
-    canvas.height = ROWS * BLOCK;
+    canvas.width = COLS * block;
+    canvas.height = ROWS * block;
 
     // 프리뷰 캔버스
     const nextCanvas = nextCanvasRef.current;
@@ -270,7 +325,7 @@ export default function Home() {
           const v = board[y][x];
           if (v === 0) continue;
           ctx.fillStyle = colorsById(v);
-          ctx.fillRect(x * BLOCK + 1, y * BLOCK + 1, BLOCK - 2, BLOCK - 2);
+          ctx.fillRect(x * block + 1, y * block + 1, block - 2, block - 2);
         }
       }
 
@@ -291,9 +346,9 @@ export default function Home() {
         for (let y = 0; y < ghost.shape.length; y++) {
           for (let x = 0; x < ghost.shape[0].length; x++) {
             if (!ghost.shape[y][x]) continue;
-            const px = (ghost.x + x) * BLOCK;
-            const py = (ghost.y + y) * BLOCK;
-            ctx.strokeRect(px + 3, py + 3, BLOCK - 6, BLOCK - 6);
+            const px = (ghost.x + x) * block;
+            const py = (ghost.y + y) * block;
+            ctx.strokeRect(px + 3, py + 3, block - 6, block - 6);
           }
         }
         ctx.restore();
@@ -305,9 +360,9 @@ export default function Home() {
       for (let y = 0; y < p.shape.length; y++) {
         for (let x = 0; x < p.shape[0].length; x++) {
           if (!p.shape[y][x]) continue;
-          const px = (p.x + x) * BLOCK;
-          const py = (p.y + y) * BLOCK;
-          ctx.fillRect(px + 1, py + 1, BLOCK - 2, BLOCK - 2);
+          const px = (p.x + x) * block;
+          const py = (p.y + y) * block;
+          ctx.fillRect(px + 1, py + 1, block - 2, block - 2);
         }
       }
 
@@ -315,14 +370,14 @@ export default function Home() {
       ctx.strokeStyle = "rgba(255,255,255,0.08)";
       for (let x = 0; x <= COLS; x++) {
         ctx.beginPath();
-        ctx.moveTo(x * BLOCK, 0);
-        ctx.lineTo(x * BLOCK, ROWS * BLOCK);
+        ctx.moveTo(x * block, 0);
+        ctx.lineTo(x * block, ROWS * block);
         ctx.stroke();
       }
       for (let y = 0; y <= ROWS; y++) {
         ctx.beginPath();
-        ctx.moveTo(0, y * BLOCK);
-        ctx.lineTo(COLS * BLOCK, y * BLOCK);
+        ctx.moveTo(0, y * block);
+        ctx.lineTo(COLS * block, y * block);
         ctx.stroke();
       }
 
@@ -501,6 +556,16 @@ export default function Home() {
       setGameOver(false);
     };
 
+    actionsRef.current = {
+      left: () => tryMove(-1, 0),
+      right: () => tryMove(1, 0),
+      down: () => tryMove(0, 1),
+      rotate: () => tryRotate(),
+      hardDrop: () => hardDrop(),
+      hold: () => hold(),
+      restart: () => restart(),
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") tryMove(-1, 0);
       else if (e.key === "ArrowRight") tryMove(1, 0);
@@ -515,12 +580,14 @@ export default function Home() {
 
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      stopRepeat();
+      actionsRef.current = null;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [gameOver]);
+  }, [gameOver, block]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-8">
+    <main className="min-h-screen flex items-center justify-center p-4 md:p-8">
       <div className="flex flex-col items-center gap-4 w-full max-w-[760px]">
         <div className="flex items-end justify-between w-full">
           <div>
@@ -537,18 +604,92 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex items-start gap-6">
-          <div className="w-[140px] flex flex-col items-center gap-2">
+        <div className="w-full grid grid-cols-2 md:grid-cols-[140px_1fr_140px] gap-4 md:gap-6 items-start">
+          {/* HOLD (mobile: left top) */}
+          <div className="flex flex-col items-center gap-2">
             <div className="text-sm font-semibold">HOLD</div>
             <canvas ref={holdCanvasRef} className="rounded-xl shadow-lg" />
             <div className="text-xs opacity-70">C / Shift</div>
           </div>
 
-          <canvas ref={canvasRef} className="rounded-xl shadow-lg" />
-
-          <div className="w-[140px] flex flex-col items-center gap-2">
+          {/* NEXT (mobile: right top, desktop: right side) */}
+          <div className="flex flex-col items-center gap-2 md:col-start-3 md:row-start-1">
             <div className="text-sm font-semibold">NEXT</div>
             <canvas ref={nextCanvasRef} className="rounded-xl shadow-lg" />
+          </div>
+
+          {/* BOARD (mobile: full width second row, desktop: center) */}
+          <div className="col-span-2 md:col-span-1 md:col-start-2 md:row-start-1 flex flex-col items-center gap-3">
+            <canvas ref={canvasRef} className="rounded-xl shadow-lg" />
+
+            {/* Mobile controls */}
+            {isTouch && (
+              <div className="w-full max-w-[420px] touch-none select-none">
+                <div className="grid grid-cols-5 gap-2">
+                  <button
+                    className="col-span-1 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-sm font-semibold"
+                    onClick={() => actionsRef.current?.hold()}
+                  >
+                    HOLD
+                  </button>
+
+                  <button
+                    className="col-span-1 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-lg font-bold"
+                    onPointerDown={startRepeat(() => actionsRef.current?.left())}
+                    onPointerUp={stopRepeat}
+                    onPointerCancel={stopRepeat}
+                    onPointerLeave={stopRepeat}
+                  >
+                    ◀
+                  </button>
+
+                  <button
+                    className="col-span-1 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-lg font-bold"
+                    onClick={() => actionsRef.current?.rotate()}
+                  >
+                    ⟳
+                  </button>
+
+                  <button
+                    className="col-span-1 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-lg font-bold"
+                    onPointerDown={startRepeat(() => actionsRef.current?.right())}
+                    onPointerUp={stopRepeat}
+                    onPointerCancel={stopRepeat}
+                    onPointerLeave={stopRepeat}
+                  >
+                    ▶
+                  </button>
+
+                  <button
+                    className="col-span-1 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-sm font-semibold"
+                    onClick={() => actionsRef.current?.hardDrop()}
+                  >
+                    DROP
+                  </button>
+
+                  <button
+                    className="col-span-2 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-sm font-semibold"
+                    onClick={() => actionsRef.current?.restart()}
+                  >
+                    RESTART
+                  </button>
+
+                  <button
+                    className="col-span-3 rounded-xl border border-white/10 bg-black/30 backdrop-blur px-3 py-3 text-lg font-bold"
+                    onPointerDown={startRepeat(() => actionsRef.current?.down())}
+                    onPointerUp={stopRepeat}
+                    onPointerCancel={stopRepeat}
+                    onPointerLeave={stopRepeat}
+                  >
+                    ▼
+                  </button>
+                </div>
+
+                <div className="mt-2 text-xs opacity-60">
+                  모바일: 버튼 길게 누르면 연속 이동/드롭 됩니다.
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
